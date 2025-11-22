@@ -101,7 +101,10 @@ class LoginWindow(ctk.CTk):
 
         # ---------- ROUTING BASED ON ROLE ----------
 
-        if role == "Receptionist":
+        if role == "Manager":
+            self.open_manager(user)
+
+        elif role == "Receptionist":
             self.open_receptionist(user)
 
         elif role in ("Bar & Restaurant", "Waiter", "Restaurant", "Bar"):
@@ -110,17 +113,11 @@ class LoginWindow(ctk.CTk):
         elif role == "Finance":
             self.open_finance(user)
 
-        elif role == "Manager":
-
-            self.open_manager(user)
-
-        elif role == "Cleaning":
-            self.open_cleaning(user)
-
         else:
             messagebox.showinfo(
                 "Not ready",
-                f"UI for role '{role}' not implemented."
+                f"Role '{role}' UI not implemented yet.\n"
+                "Use 'manager', 'reception', 'waiter' or 'finance'."
             )
 
     # ---------- OPEN WINDOWS ----------
@@ -143,7 +140,7 @@ class LoginWindow(ctk.CTk):
     def open_manager(self, user: dict):
         self.withdraw()
         win = ManagerWindow(parent=self, user=user)
-        win.protocol("WM_DELETE_WINDOW", win.on_window_close)
+        # ManagerWindow handles its own close to return to login
 
     def open_cleaning(self, user):
         self.withdraw()

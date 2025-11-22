@@ -2,9 +2,7 @@
 
 import customtkinter as ctk
 from tkinter import messagebox
-from typing import Dict, Optional, List
 
-# Import your existing windows
 from ui.receptionist import ReceptionistWindow
 from ui.restaurant import RestaurantWindow
 from ui.cleaning import CleaningWindow
@@ -13,805 +11,633 @@ from ui.finance import FinanceWindow
 
 class ManagerWindow(ctk.CTkToplevel):
     """
-    Manager / Super-User UI
+    Manager / Admin UI
 
-    - Left sidebar navigation
-    - Central content area with pages:
-        • Dashboard
-        • Rooms Manager
-        • Restaurant Manager
-        • Cleaning Manager
-        • Finance Dashboard
-        • Staff & Users
-        • Settings
-
-    From here, the Manager can open the other modules (Reception, Restaurant,
-    Cleaning, Finance) and still return back to this window on their "Logout".
+    - Sidebar navigation with manager sections
+    - Dashboard shows stats + buttons to open department UIs
+    - Logout returns to LoginWindow
     """
 
-    def __init__(self, parent=None, user: Optional[Dict] = None):
+    def __init__(self, parent=None, user=None):
         super().__init__()
 
-        # Parent is usually the LoginWindow
-        self.parent = parent
+        self.parent = parent          # LoginWindow
         self.user = user or {"username": "manager"}
 
-        # Basic window setup
+        # Make modal over login
+        if self.parent is not None:
+            self.transient(self.parent)
+            self.grab_set()
+
         self.title("InnKeeper • Manager")
-        self.geometry("1400x800")
+        self.geometry("1300x780")
         self.minsize(1100, 650)
+
+        # default CTK theme
         ctk.set_appearance_mode("light")
-        self.configure(fg_color="#F3F4F6")
 
-        # Keep track of "pages"
-        self.current_page_name: Optional[str] = None
-        self.pages: Dict[str, ctk.CTkFrame] = {}
+        # current theme + current page
+        self.theme_var = ctk.StringVar(value="Light")
+        self.current_page = "dashboard"
 
-        # Build layout
+        # main containers (will be created in _build_layout)
+        self.sidebar: ctk.CTkFrame | None = None
+        self.content: ctk.CTkFrame | None = None
+
+        # build layout
         self._build_layout()
 
-        # Close behavior
+        # when manager window is open, hide login
+        if self.parent is not None:
+            try:
+                self.parent.withdraw()
+            except Exception:
+                pass
+
         self.protocol("WM_DELETE_WINDOW", self.on_window_close)
 
-    # ------------------------------------------------------------------
-    # LAYOUT
-    # ------------------------------------------------------------------
+    # ---------- LAYOUT ROOT ----------
 
     def _build_layout(self):
-        # Top bar
-        top_bar = ctk.CTkFrame(self, fg_color="#FFFFFF", height=60, corner_radius=0)
-        top_bar.pack(side="top", fill="x")
+        # main 2-column layout
+        self.sidebar = ctk.CTkFrame(self, fg_color="#111827", corner_radius=0, width=220)
+        self.sidebar.pack(side="left", fill="y")
 
+        self.content = ctk.CTkFrame(self, fg_color="#F3F4F6")
+        self.content.pack(side="right", fill="both", expand=True)
+
+        self._build_sidebar()
+        self._build_dashboard()  # default page
+
+    def _build_sidebar(self):
+        # App title
         title = ctk.CTkLabel(
-            top_bar,
-            text="InnKeeper • Manager Console",
+            self.sidebar,
+            text="InnKeeper\nManager",
             font=ctk.CTkFont(size=20, weight="bold"),
-            anchor="w",
-        )
-        title.pack(side="left", padx=20, pady=10)
-
-        user_label = ctk.CTkLabel(
-            top_bar,
-            text=f"Logged in as: {self.user.get('username', 'manager')}",
-            font=ctk.CTkFont(size=13),
-            anchor="e",
-            text_color="#6B7280",
-        )
-        user_label.pack(side="right", padx=20)
-
-        # Main area: sidebar + content
-        main_frame = ctk.CTkFrame(self, fg_color="#E5E7EB", corner_radius=0)
-        main_frame.pack(fill="both", expand=True)
-
-        # Sidebar
-        sidebar = ctk.CTkFrame(main_frame, fg_color="#1F2937", width=220, corner_radius=0)
-        sidebar.pack(side="left", fill="y")
-
-        self._build_sidebar(sidebar)
-
-        # Content area
-        self.content_frame = ctk.CTkFrame(main_frame, fg_color="#F3F4F6")
-        self.content_frame.pack(side="left", fill="both", expand=True)
-
-        # Build all pages
-        self._build_pages()
-
-        # Show default page
-        self.show_page("dashboard")
-
-    def _build_sidebar(self, sidebar: ctk.CTkFrame):
-        # Sidebar title
-        ctk.CTkLabel(
-            sidebar,
-            text="Manager Menu",
-            font=ctk.CTkFont(size=17, weight="bold"),
+            justify="left",
             text_color="white",
-        ).pack(pady=(20, 10), padx=16, anchor="w")
+        )
+        title.pack(padx=20, pady=(20, 30), anchor="w")
 
-        # Helper to create nav buttons
-        def nav_btn(text: str, page_name: str):
-            return ctk.CTkButton(
-                sidebar,
+        # helper to create nav buttons
+        def nav_btn(text, command):
+            b = ctk.CTkButton(
+                self.sidebar,
                 text=text,
+                width=180,
                 height=40,
-                fg_color="#111827",
+                fg_color="#1F2937",
                 hover_color="#374151",
                 text_color="white",
                 anchor="w",
-                command=lambda pn=page_name: self.show_page(pn),
+                command=command,
             )
+            b.pack(padx=20, pady=4)
+            return b
 
-        # Navigation buttons
-        nav_btn("🏠  Dashboard", "dashboard").pack(fill="x", padx=12, pady=4)
-        nav_btn("🛏️  Rooms Manager", "rooms").pack(fill="x", padx=12, pady=4)
-        nav_btn("🍽️  Restaurant Manager", "restaurant").pack(fill="x", padx=12, pady=4)
-        nav_btn("🧹  Cleaning Manager", "cleaning").pack(fill="x", padx=12, pady=4)
-        nav_btn("💰  Finance Dashboard", "finance").pack(fill="x", padx=12, pady=4)
-        nav_btn("👥  Staff & Users", "staff").pack(fill="x", padx=12, pady=4)
-        nav_btn("⚙️  Settings", "settings").pack(fill="x", padx=12, pady=4)
+        # Sidebar sections → manager pages (NOT department UIs)
+        self.btn_dashboard = nav_btn("🏠  Dashboard", self._build_dashboard)
+        self.btn_rooms = nav_btn("🛏️  Rooms Manager", self._build_rooms_manager_panel)
+        self.btn_restaurant = nav_btn("🍽️  Restaurant Manager", self._build_restaurant_manager_panel)
+        self.btn_cleaning = nav_btn("🧹  Cleaning Manager", self._build_cleaning_manager_panel)
+        self.btn_finance = nav_btn("💰  Finance Dashboard", self._build_finance_manager_panel)
+        self.btn_staff = nav_btn("👥  Staff & Users", self._build_staff_panel)
+        self.btn_settings = nav_btn("⚙️  Settings", self._build_settings_panel)
 
-        # Spacer
-        ctk.CTkLabel(sidebar, text="", fg_color="transparent").pack(expand=True)
+        # spacer
+        ctk.CTkLabel(self.sidebar, text="", fg_color="transparent").pack(expand=True, fill="y")
 
         # Logout button
         ctk.CTkButton(
-            sidebar,
+            self.sidebar,
             text="🚪  Logout",
+            width=180,
+            height=40,
             fg_color="#DC2626",
             hover_color="#B91C1C",
             text_color="white",
-            height=40,
-            command=self.on_logout,
-        ).pack(fill="x", padx=12, pady=(0, 16))
+            command=self._logout,
+        ).pack(padx=20, pady=20)
 
-    # ------------------------------------------------------------------
-    # PAGES
-    # ------------------------------------------------------------------
+    # ---------- CONTENT HELPERS ----------
 
-    def _build_pages(self):
-        self.pages["dashboard"] = self._build_dashboard_page()
-        self.pages["rooms"] = self._build_rooms_page()
-        self.pages["restaurant"] = self._build_restaurant_page()
-        self.pages["cleaning"] = self._build_cleaning_page()
-        self.pages["finance"] = self._build_finance_page()
-        self.pages["staff"] = self._build_staff_page()
-        self.pages["settings"] = self._build_settings_page()
+    def _clear_content(self):
+        for child in self.content.winfo_children():
+            child.destroy()
 
-    def show_page(self, name: str):
-        if self.current_page_name == name:
-            return
+    def _refresh_current_page(self):
+        """Rebuild the current page (used after theme change)."""
+        if self.current_page == "dashboard":
+            self._build_dashboard()
+        elif self.current_page == "rooms":
+            self._build_rooms_manager_panel()
+        elif self.current_page == "restaurant":
+            self._build_restaurant_manager_panel()
+        elif self.current_page == "cleaning":
+            self._build_cleaning_manager_panel()
+        elif self.current_page == "finance":
+            self._build_finance_manager_panel()
+        elif self.current_page == "staff":
+            self._build_staff_panel()
+        elif self.current_page == "settings":
+            self._build_settings_panel()
 
-        # Hide all pages
-        for page in self.pages.values():
-            page.pack_forget()
+    # ---------- DASHBOARD ----------
 
-        # Show requested
-        page = self.pages.get(name)
-        if page is not None:
-            page.pack(fill="both", expand=True, padx=20, pady=20)
+    def _build_dashboard(self):
+        self.current_page = "dashboard"
+        self._clear_content()
 
-        self.current_page_name = name
-
-    # ------------------------------------------------------------------
-    # DASHBOARD PAGE
-    # ------------------------------------------------------------------
-
-    def _build_dashboard_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            frame,
+            wrapper,
             text="Manager Dashboard",
             font=ctk.CTkFont(size=22, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 10))
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
-            frame,
-            text="High-level overview (demo values). In a full app, this pulls live data\n"
-                 "from Reception, Restaurant, Cleaning, and Finance modules.",
+            wrapper,
+            text="Quick overview of the hotel (demo placeholders for now).",
             font=ctk.CTkFont(size=13),
-            text_color="#6B7280",
-            justify="left",
-        ).pack(anchor="w", padx=20)
+            text_color="#4B5563",
+        ).pack(anchor="w", pady=(0, 20))
 
-        cards = ctk.CTkFrame(frame, fg_color="#F9FAFB")
-        cards.pack(fill="x", padx=20, pady=20)
+        # Simple 3 cards row (dummy data for presentation)
+        cards = ctk.CTkFrame(wrapper, fg_color="#F3F4F6")
+        cards.pack(fill="x")
 
-        def stat_card(parent, title, value, desc):
+        def stat_card(parent, title, value, note):
             card = ctk.CTkFrame(parent, fg_color="white", corner_radius=16)
-            card.pack(side="left", fill="both", expand=True, padx=8)
-            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=14, weight="bold")).pack(
-                anchor="w", padx=14, pady=(10, 2)
-            )
-            ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=24, weight="bold")).pack(
-                anchor="w", padx=14, pady=(0, 4)
-            )
-            ctk.CTkLabel(card, text=desc, font=ctk.CTkFont(size=12), text_color="#6B7280").pack(
-                anchor="w", padx=14, pady=(0, 10)
-            )
+            card.pack(side="left", fill="x", expand=True, padx=6)
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=ctk.CTkFont(size=14, weight="bold"),
+                anchor="w",
+            ).pack(anchor="w", padx=12, pady=(10, 2))
+            ctk.CTkLabel(
+                card,
+                text=value,
+                font=ctk.CTkFont(size=20, weight="bold"),
+            ).pack(anchor="w", padx=12, pady=(0, 2))
+            ctk.CTkLabel(
+                card,
+                text=note,
+                font=ctk.CTkFont(size=11),
+                text_color="#6B7280",
+            ).pack(anchor="w", padx=12, pady=(0, 10))
 
-        stat_card(cards, "Occupied Rooms", "18", "Demo value – connect to Reception later.")
-        stat_card(cards, "Today’s Restaurant Revenue", "€ 742.50", "Demo value – from Restaurant & Finance.")
-        stat_card(cards, "Pending Cleanings", "7", "Demo value – from Cleaning Service.")
+        stat_card(cards, "Occupied Rooms", "18", "Live data can be wired from DB")
+        stat_card(cards, "Restaurant Orders Today", "42", "Pulled from finance / restaurant")
+        stat_card(cards, "Pending Cleanings", "7", "From cleaning module")
 
-        # Quick access buttons
-        quick = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        quick.pack(fill="x", padx=20, pady=(0, 20))
-
-        ctk.CTkLabel(
-            quick,
-            text="Quick Actions",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=14, pady=(10, 6))
-
-        btn_row = ctk.CTkFrame(quick, fg_color="white")
-        btn_row.pack(fill="x", padx=10, pady=(0, 12))
-
-        ctk.CTkButton(
-            btn_row,
-            text="Open Reception UI",
-            width=160,
-            command=self.open_receptionist,
-        ).pack(side="left", padx=6, pady=6)
-
-        ctk.CTkButton(
-            btn_row,
-            text="Open Restaurant UI",
-            width=160,
-            command=self.open_restaurant,
-        ).pack(side="left", padx=6, pady=6)
-
-        ctk.CTkButton(
-            btn_row,
-            text="Open Cleaning UI",
-            width=160,
-            command=self.open_cleaning,
-        ).pack(side="left", padx=6, pady=6)
-
-        ctk.CTkButton(
-            btn_row,
-            text="Open Finance UI",
-            width=160,
-            command=self.open_finance,
-        ).pack(side="left", padx=6, pady=6)
-
-        return frame
-
-    # ------------------------------------------------------------------
-    # ROOMS MANAGER PAGE
-    # ------------------------------------------------------------------
-
-    def _build_rooms_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
+        # Bottom area with department access buttons
+        bottom = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        bottom.pack(fill="both", expand=True, pady=20, padx=2)
 
         ctk.CTkLabel(
-            frame,
+            bottom,
+            text="Open Department UIs",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+
+        grid = ctk.CTkFrame(bottom, fg_color="white")
+        grid.pack(padx=16, pady=(0, 16), fill="x")
+
+        def big_ui_btn(parent, text, command):
+            btn = ctk.CTkButton(
+                parent,
+                text=text,
+                height=60,
+                fg_color="#3B82F6",
+                hover_color="#2563EB",
+                text_color="white",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                corner_radius=12,
+                command=command,
+            )
+            return btn
+
+        # 2x2 layout
+        btn1 = big_ui_btn(grid, "Reception UI", self.open_reception_ui)
+        btn2 = big_ui_btn(grid, "Bar & Restaurant UI", self.open_restaurant_ui)
+        btn3 = big_ui_btn(grid, "Cleaning Service UI", self.open_cleaning_ui)
+        btn4 = big_ui_btn(grid, "Finance UI", self.open_finance_ui)
+
+        btn1.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        btn2.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+        btn3.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+        btn4.grid(row=1, column=1, sticky="nsew", padx=6, pady=6)
+
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        grid.rowconfigure(0, weight=1)
+        grid.rowconfigure(1, weight=1)
+
+    # ---------- ROOMS MANAGER PANEL ----------
+
+    def _build_rooms_manager_panel(self):
+        self.current_page = "rooms"
+        self._clear_content()
+
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            wrapper,
             text="Rooms Manager",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
-            frame,
-            text="Here the manager can *conceptually* edit rooms (number, type, price).\n"
-                 "For this project demo, actions show a confirmation popup instead of\n"
-                 "actually changing the database.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-            justify="left",
-        ).pack(anchor="w", padx=20)
+            wrapper,
+            text="Here you will manage room numbers, typology and prices (demo table).",
+            font=ctk.CTkFont(size=13),
+            text_color="#4B5563",
+        ).pack(anchor="w", pady=(0, 20))
 
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
+        table = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        table.pack(fill="x")
 
-        # Left side: form
-        form = ctk.CTkFrame(main, fg_color="white")
-        form.pack(side="left", fill="y", padx=16, pady=16)
+        header = ctk.CTkFrame(table, fg_color="#E5E7EB", corner_radius=8)
+        header.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkLabel(form, text="Room Editor", font=ctk.CTkFont(size=14, weight="bold")).pack(
-            anchor="w", pady=(0, 10)
-        )
-
-        # Room number
-        ctk.CTkLabel(form, text="Room Number:").pack(anchor="w")
-        room_number_entry = ctk.CTkEntry(form, placeholder_text="e.g. 101")
-        room_number_entry.pack(fill="x", pady=(0, 8))
-
-        # Type
-        ctk.CTkLabel(form, text="Room Type / Topology:").pack(anchor="w")
-        room_type_entry = ctk.CTkEntry(form, placeholder_text="e.g. Double, Suite...")
-        room_type_entry.pack(fill="x", pady=(0, 8))
-
-        # Price
-        ctk.CTkLabel(form, text="Price per Night (€):").pack(anchor="w")
-        room_price_entry = ctk.CTkEntry(form, placeholder_text="e.g. 69.99")
-        room_price_entry.pack(fill="x", pady=(0, 12))
-
-        # Buttons
-        btns = ctk.CTkFrame(form, fg_color="white")
-        btns.pack(fill="x", pady=(4, 0))
-
-        def _demo_action(kind: str):
-            rn = room_number_entry.get().strip() or "(no room)"
-            rt = room_type_entry.get().strip() or "(no type)"
-            rp = room_price_entry.get().strip() or "(no price)"
-            messagebox.showinfo(
-                "Demo",
-                f"{kind} room:\n"
-                f"Number: {rn}\n"
-                f"Type: {rt}\n"
-                f"Price: {rp}\n\n"
-                f"(In a full implementation this would update the database.)"
+        def h(txt, w):
+            ctk.CTkLabel(header, text=txt, width=w,
+                         font=ctk.CTkFont(size=13, weight="bold")).pack(
+                side="left", padx=4, pady=4
             )
 
-        ctk.CTkButton(btns, text="Add Room", command=lambda: _demo_action("Add")).pack(
-            side="left", padx=4, pady=4
-        )
-        ctk.CTkButton(btns, text="Update Room", command=lambda: _demo_action("Update")).pack(
-            side="left", padx=4, pady=4
-        )
-        ctk.CTkButton(
-            btns,
-            text="Delete Room",
-            fg_color="#DC2626",
-            hover_color="#B91C1C",
-            command=lambda: _demo_action("Delete"),
-        ).pack(side="left", padx=4, pady=4)
+        h("Room No.", 100)
+        h("Typology", 140)
+        h("Price / night", 120)
+        h("Status", 100)
 
-        # Right side: simple "table" preview
-        right = ctk.CTkFrame(main, fg_color="#F3F4F6", corner_radius=16)
-        right.pack(side="left", fill="both", expand=True, padx=16, pady=16)
+        # demo rows
+        demo_data = [
+            ("101", "Single", "45 €", "Active"),
+            ("102", "Double", "65 €", "Active"),
+            ("201", "Suite", "120 €", "Inactive"),
+        ]
+        for rno, typ, price, st in demo_data:
+            row = ctk.CTkFrame(table, fg_color="white", corner_radius=8)
+            row.pack(fill="x", padx=10, pady=(0, 6))
+
+            def cell(txt, w):
+                ctk.CTkLabel(row, text=txt, width=w).pack(side="left", padx=4, pady=4)
+
+            cell(rno, 100)
+            cell(typ, 140)
+            cell(price, 120)
+            cell(st, 100)
+
+    # ---------- RESTAURANT MANAGER PANEL ----------
+
+    def _build_restaurant_manager_panel(self):
+        self.current_page = "restaurant"
+        self._clear_content()
+
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            right,
-            text="Rooms Overview (demo)",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=12, pady=(10, 6))
+            wrapper,
+            text="Restaurant Manager",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
-        info = (
-            "In a complete version, this area would show a table pulled from the database,\n"
-            "with filters for floor, type, price, and status.\n\n"
-            "For now, you can explain to the professor that:\n"
-            "• This is the manager control center for rooms.\n"
-            "• The forms on the left are ready to be wired to backend.\n"
-            "• Receptionist UI already works with real room data."
-        )
         ctk.CTkLabel(
-            right,
-            text=info,
-            font=ctk.CTkFont(size=12),
+            wrapper,
+            text="Manage menu items and prices (demo table).",
+            font=ctk.CTkFont(size=13),
             text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=12, pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 20))
 
-        ctk.CTkButton(
-            right,
-            text="Open Reception UI (live rooms view)",
-            command=self.open_receptionist,
-        ).pack(anchor="w", padx=12, pady=(4, 10))
+        table = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        table.pack(fill="x")
 
-        return frame
+        header = ctk.CTkFrame(table, fg_color="#E5E7EB", corner_radius=8)
+        header.pack(fill="x", padx=10, pady=10)
 
-    # ------------------------------------------------------------------
-    # RESTAURANT MANAGER PAGE
-    # ------------------------------------------------------------------
-
-    def _build_restaurant_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
-
-        ctk.CTkLabel(
-            frame,
-            text="Restaurant & Bar Manager",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
-
-        ctk.CTkLabel(
-            frame,
-            text="Here the manager controls restaurant tables and menu items.\n"
-                 "For now, this is a management *prototype* UI with demo buttons.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-        ).pack(anchor="w", padx=20)
-
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-
-        # Left: menu editor demo
-        left = ctk.CTkFrame(main, fg_color="white")
-        left.pack(side="left", fill="y", padx=16, pady=16)
-
-        ctk.CTkLabel(left, text="Menu Item Editor", font=ctk.CTkFont(size=14, weight="bold")).pack(
-            anchor="w", pady=(0, 10)
-        )
-
-        ctk.CTkLabel(left, text="Item Name:").pack(anchor="w")
-        item_name_entry = ctk.CTkEntry(left, placeholder_text="e.g. Spaghetti Bolognese")
-        item_name_entry.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkLabel(left, text="Category:").pack(anchor="w")
-        item_cat_entry = ctk.CTkEntry(left, placeholder_text="e.g. Main Dish / Dessert / Drink")
-        item_cat_entry.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkLabel(left, text="Price (€):").pack(anchor="w")
-        item_price_entry = ctk.CTkEntry(left, placeholder_text="e.g. 7.50")
-        item_price_entry.pack(fill="x", pady=(0, 10))
-
-        def restaurant_demo(kind: str):
-            messagebox.showinfo(
-                "Demo",
-                f"{kind} menu item:\n"
-                f"- Name: {item_name_entry.get().strip() or '(none)'}\n"
-                f"- Category: {item_cat_entry.get().strip() or '(none)'}\n"
-                f"- Price: {item_price_entry.get().strip() or '(none)'}\n\n"
-                f"(Backend not wired yet – this is a UI prototype.)"
+        def h(txt, w):
+            ctk.CTkLabel(header, text=txt, width=w,
+                         font=ctk.CTkFont(size=13, weight="bold")).pack(
+                side="left", padx=4, pady=4
             )
 
-        btns = ctk.CTkFrame(left, fg_color="white")
-        btns.pack(fill="x")
+        h("Item", 220)
+        h("Category", 140)
+        h("Price", 80)
 
-        ctk.CTkButton(btns, text="Add", command=lambda: restaurant_demo("Add")).pack(
-            side="left", padx=4, pady=4
-        )
-        ctk.CTkButton(btns, text="Update", command=lambda: restaurant_demo("Update")).pack(
-            side="left", padx=4, pady=4
-        )
-        ctk.CTkButton(
-            btns,
-            text="Delete",
-            fg_color="#DC2626",
-            hover_color="#B91C1C",
-            command=lambda: restaurant_demo("Delete"),
-        ).pack(side="left", padx=4, pady=4)
+        demo_items = [
+            ("Espresso", "Hot Drink", "1.50 €"),
+            ("Coca Cola 0.33L", "Cold Drink", "2.50 €"),
+            ("Greek Salad", "Salad", "5.50 €"),
+        ]
+        for name, cat, price in demo_items:
+            row = ctk.CTkFrame(table, fg_color="white", corner_radius=8)
+            row.pack(fill="x", padx=10, pady=(0, 6))
 
-        # Right: explanation & link
-        right = ctk.CTkFrame(main, fg_color="#F3F4F6", corner_radius=16)
-        right.pack(side="left", fill="both", expand=True, padx=16, pady=16)
+            def cell(txt, w):
+                ctk.CTkLabel(row, text=txt, width=w, anchor="w").pack(
+                    side="left", padx=4, pady=4
+                )
+
+            cell(name, 220)
+            cell(cat, 140)
+            cell(price, 80)
+
+    # ---------- CLEANING MANAGER PANEL ----------
+
+    def _build_cleaning_manager_panel(self):
+        self.current_page = "cleaning"
+        self._clear_content()
+
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            right,
-            text="Tables & Live Service",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=12, pady=(10, 6))
+            wrapper,
+            text="Cleaning Manager",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
-        text = (
-            "• The Waiter / Restaurant UI you already built is used for live orders.\n"
-            "• Here, the manager can configure menu items and (in the future) table layouts.\n"
-            "• Tables (1–15) are handled in the Waiter UI, but a manager could add/remove them here.\n\n"
-            "For the project presentation, you can say:\n"
-            "➡ Manager can supervise and configure Bar & Restaurant, while\n"
-            "   waiters use the dedicated service UI for daily work."
-        )
         ctk.CTkLabel(
-            right,
-            text=text,
-            font=ctk.CTkFont(size=12),
+            wrapper,
+            text="Overview of cleaning staff and assignments (demo).",
+            font=ctk.CTkFont(size=13),
             text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=12, pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 20))
 
-        ctk.CTkButton(
-            right,
-            text="Open Waiter / Restaurant UI",
-            command=self.open_restaurant,
-        ).pack(anchor="w", padx=12, pady=(4, 10))
+        table = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        table.pack(fill="x")
 
-        return frame
+        header = ctk.CTkFrame(table, fg_color="#E5E7EB", corner_radius=8)
+        header.pack(fill="x", padx=10, pady=10)
 
-    # ------------------------------------------------------------------
-    # CLEANING MANAGER PAGE
-    # ------------------------------------------------------------------
+        def h(txt, w):
+            ctk.CTkLabel(header, text=txt, width=w,
+                         font=ctk.CTkFont(size=13, weight="bold")).pack(
+                side="left", padx=4, pady=4
+            )
 
-    def _build_cleaning_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
+        h("Cleaner", 200)
+        h("Assigned Rooms", 200)
 
-        ctk.CTkLabel(
-            frame,
-            text="Cleaning / Housekeeping Manager",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
+        demo_rows = [
+            ("Cleaning Lady 1", "101, 102, 201"),
+            ("Cleaning Lady 2", "103, 104, 202"),
+            ("Cleaning Lady 3", "105, 106, 203"),
+        ]
+        for name, rooms in demo_rows:
+            row = ctk.CTkFrame(table, fg_color="white", corner_radius=8)
+            row.pack(fill="x", padx=10, pady=(0, 6))
 
-        ctk.CTkLabel(
-            frame,
-            text="This section summarizes the cleaning service module.\n"
-                 "Full control of room statuses is inside the Cleaning UI.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-        ).pack(anchor="w", padx=20)
+            def cell(txt, w):
+                ctk.CTkLabel(row, text=txt, width=w, anchor="w").pack(
+                    side="left", padx=4, pady=4
+                )
 
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
+            cell(name, 200)
+            cell(rooms, 200)
 
-        ctk.CTkLabel(
-            main,
-            text="Overview",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=16, pady=(14, 6))
+    # ---------- FINANCE MANAGER PANEL ----------
 
-        info = (
-            "• The Cleaning Service UI displays each room with status (Clean, Needs Cleaning, Occupied).\n"
-            "• It also has a Management tab that summarizes how many rooms each staff member has.\n"
-            "• From the Manager perspective, this module is already operational.\n\n"
-            "Future ideas:\n"
-            "• Export a daily cleaning report.\n"
-            "• Enforce a deadline (e.g. all check-out rooms cleaned before 14:00).\n"
-            "• Notify Finance / Reception when cleaning is delayed."
-        )
+    def _build_finance_manager_panel(self):
+        self.current_page = "finance"
+        self._clear_content()
+
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            main,
-            text=info,
-            font=ctk.CTkFont(size=12),
-            text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=16, pady=(0, 10))
-
-        ctk.CTkButton(
-            main,
-            text="Open Cleaning Service UI",
-            command=self.open_cleaning,
-        ).pack(anchor="w", padx=16, pady=(4, 10))
-
-        return frame
-
-    # ------------------------------------------------------------------
-    # FINANCE DASHBOARD PAGE
-    # ------------------------------------------------------------------
-
-    def _build_finance_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
-
-        ctk.CTkLabel(
-            frame,
+            wrapper,
             text="Finance Dashboard",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
-            frame,
-            text="High-level finance overview. Detailed logs are available in the Finance UI.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-        ).pack(anchor="w", padx=20)
-
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-
-        # Two columns
-        left = ctk.CTkFrame(main, fg_color="white")
-        left.pack(side="left", fill="both", expand=True, padx=12, pady=12)
-
-        right = ctk.CTkFrame(main, fg_color="white")
-        right.pack(side="left", fill="both", expand=True, padx=12, pady=12)
-
-        # Left: summary demo cards
-        ctk.CTkLabel(
-            left,
-            text="Today (Demo values)",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=10, pady=(4, 6))
-
-        def f_card(parent, label, value):
-            card = ctk.CTkFrame(parent, fg_color="#F3F4F6", corner_radius=12)
-            card.pack(fill="x", padx=6, pady=4)
-            ctk.CTkLabel(card, text=label, font=ctk.CTkFont(size=12, weight="bold")).pack(
-                anchor="w", padx=10, pady=(6, 0)
-            )
-            ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=16, weight="bold")).pack(
-                anchor="w", padx=10, pady=(0, 8)
-            )
-
-        f_card(left, "Total Revenue", "€ 1,245.00")
-        f_card(left, "From Rooms", "€ 820.00")
-        f_card(left, "From Restaurant", "€ 425.00")
-
-        # Right: explanation + button
-        ctk.CTkLabel(
-            right,
-            text="Details & Reports",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(anchor="w", padx=10, pady=(4, 6))
-
-        text = (
-            "Your Finance UI already receives logs from:\n"
-            "• Restaurant bills (via Waiter / Restaurant module)\n"
-            "• Other manual entries (if implemented).\n\n"
-            "From the Manager UI, you can quickly open the Finance window\n"
-            "to show daily / monthly reports, then come back here with Logout."
-        )
-
-        ctk.CTkLabel(
-            right,
-            text=text,
-            font=ctk.CTkFont(size=12),
+            wrapper,
+            text="High-level financial overview (demo placeholders).",
+            font=ctk.CTkFont(size=13),
             text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=10, pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 20))
 
-        ctk.CTkButton(
-            right,
-            text="Open Finance UI",
-            command=self.open_finance,
-        ).pack(anchor="w", padx=10, pady=(4, 10))
+        cards = ctk.CTkFrame(wrapper, fg_color="#F3F4F6")
+        cards.pack(fill="x")
 
-        return frame
-
-    # ------------------------------------------------------------------
-    # STAFF & USERS PAGE
-    # ------------------------------------------------------------------
-
-    def _build_staff_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
-
-        ctk.CTkLabel(
-            frame,
-            text="Staff & Users Management",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
-
-        ctk.CTkLabel(
-            frame,
-            text="Conceptual interface for managing application users and roles.\n"
-                 "For this project, it shows a working UI but does not fully edit the DB.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-        ).pack(anchor="w", padx=20)
-
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-
-        # Left: user form
-        left = ctk.CTkFrame(main, fg_color="white")
-        left.pack(side="left", fill="y", padx=16, pady=16)
-
-        ctk.CTkLabel(left, text="Create / Edit User (Demo)", font=ctk.CTkFont(size=14, weight="bold")).pack(
-            anchor="w", pady=(0, 8)
-        )
-
-        ctk.CTkLabel(left, text="Username:").pack(anchor="w")
-        user_entry = ctk.CTkEntry(left, placeholder_text="e.g. reception")
-        user_entry.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkLabel(left, text="Full Name:").pack(anchor="w")
-        name_entry = ctk.CTkEntry(left, placeholder_text="e.g. John Doe")
-        name_entry.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkLabel(left, text="Password:").pack(anchor="w")
-        pass_entry = ctk.CTkEntry(left, placeholder_text="••••••", show="●")
-        pass_entry.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkLabel(left, text="Role:").pack(anchor="w")
-        role_var = ctk.StringVar(value="Receptionist")
-        role_menu = ctk.CTkOptionMenu(
-            left,
-            values=["Manager", "Receptionist", "Bar & Restaurant", "Cleaning", "Finance"],
-            variable=role_var,
-            width=200,
-        )
-        role_menu.pack(fill="x", pady=(0, 8))
-
-        def staff_demo(kind: str):
-            messagebox.showinfo(
-                "Demo",
-                f"{kind} user:\n"
-                f"Username: {user_entry.get().strip() or '(none)'}\n"
-                f"Name: {name_entry.get().strip() or '(none)'}\n"
-                f"Role: {role_var.get()}\n\n"
-                f"(Database wiring can be added via backend.users.)"
+        def card(parent, title, val):
+            f = ctk.CTkFrame(parent, fg_color="white", corner_radius=16)
+            f.pack(side="left", fill="x", expand=True, padx=6)
+            ctk.CTkLabel(f, text=title,
+                         font=ctk.CTkFont(size=14, weight="bold")).pack(
+                anchor="w", padx=12, pady=(10, 4)
+            )
+            ctk.CTkLabel(f, text=val,
+                         font=ctk.CTkFont(size=18, weight="bold")).pack(
+                anchor="w", padx=12, pady=(0, 10)
             )
 
-        btns = ctk.CTkFrame(left, fg_color="white")
-        btns.pack(fill="x", pady=(4, 0))
+        card(cards, "Today Revenue", "560 €")
+        card(cards, "Month Revenue", "12 340 €")
+        card(cards, "Pending Payments", "4")
 
-        ctk.CTkButton(btns, text="Add / Save", command=lambda: staff_demo("Add / Save")).pack(
-            side="left", padx=4, pady=4
-        )
-        ctk.CTkButton(
-            btns,
-            text="Delete",
-            fg_color="#DC2626",
-            hover_color="#B91C1C",
-            command=lambda: staff_demo("Delete"),
-        ).pack(side="left", padx=4, pady=4)
+    # ---------- STAFF & USERS (placeholder for now) ----------
 
-        # Right: explanation
-        right = ctk.CTkFrame(main, fg_color="#F3F4F6", corner_radius=16)
-        right.pack(side="left", fill="both", expand=True, padx=16, pady=16)
+    def _build_staff_panel(self):
+        self.current_page = "staff"
+        self._clear_content()
 
-        text = (
-            "In a full implementation, this screen would:\n"
-            "• Load existing users from the database.\n"
-            "• Let you change roles (like Manager, Receptionist, etc.).\n"
-            "• Control who can access which modules of the app.\n\n"
-            "For your presentation, you can explain that the architecture is ready:\n"
-            "• Login already checks role and opens the correct UI.\n"
-            "• Manager is the super user, with access to all modules.\n"
-        )
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            right,
-            text=text,
-            font=ctk.CTkFont(size=12),
+            wrapper,
+            text="Staff & Users",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkLabel(
+            wrapper,
+            text="(Demo) Here you will be able to add/remove users, set roles and privileges.",
+            font=ctk.CTkFont(size=13),
             text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=12, pady=10)
+        ).pack(anchor="w", pady=(0, 20))
 
-        return frame
+        # Simple table placeholder
+        table = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        table.pack(fill="x")
 
-    # ------------------------------------------------------------------
-    # SETTINGS PAGE
-    # ------------------------------------------------------------------
+        header = ctk.CTkFrame(table, fg_color="#E5E7EB", corner_radius=8)
+        header.pack(fill="x", padx=10, pady=10)
 
-    def _build_settings_page(self) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.content_frame, fg_color="#F9FAFB", corner_radius=20)
+        def h(txt, w):
+            ctk.CTkLabel(header, text=txt, width=w,
+                         font=ctk.CTkFont(size=13, weight="bold")).pack(
+                side="left", padx=4, pady=4
+            )
+
+        h("Username", 160)
+        h("Full name", 200)
+        h("Role", 140)
+        h("Status", 100)
+
+        # demo row
+        row = ctk.CTkFrame(table, fg_color="white", corner_radius=8)
+        row.pack(fill="x", padx=10, pady=(0, 10))
+
+        def cell(txt, w):
+            ctk.CTkLabel(row, text=txt, width=w).pack(side="left", padx=4, pady=4)
+
+        cell("manager", 160)
+        cell("Main Manager", 200)
+        cell("Manager", 140)
+        cell("Active", 100)
+
+    # ---------- SETTINGS PANEL (with theme + hotel name) ----------
+
+    def _build_settings_panel(self):
+        self.current_page = "settings"
+        self._clear_content()
+
+        wrapper = ctk.CTkFrame(self.content, fg_color="#F3F4F6")
+        wrapper.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
-            frame,
-            text="Application Settings",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=20, pady=(20, 6))
+            wrapper,
+            text="Settings",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
-            frame,
-            text="Simple global settings for the demo (appearance mode, etc.).",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280",
-        ).pack(anchor="w", padx=20)
+            wrapper,
+            text="General application settings (demo version).",
+            font=ctk.CTkFont(size=13),
+            text_color="#4B5563",
+        ).pack(anchor="w", pady=(0, 20))
 
-        main = ctk.CTkFrame(frame, fg_color="white", corner_radius=16)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-
-        # Appearance
-        appearance_row = ctk.CTkFrame(main, fg_color="white")
-        appearance_row.pack(anchor="w", padx=16, pady=(10, 6))
+        # Theme selector
+        theme_frame = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        theme_frame.pack(fill="x", pady=(0, 16))
 
         ctk.CTkLabel(
-            appearance_row,
-            text="Appearance Mode:",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            theme_frame,
+            text="Theme",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(anchor="w", padx=16, pady=(10, 4))
+
+        theme_row = ctk.CTkFrame(theme_frame, fg_color="white")
+        theme_row.pack(anchor="w", padx=16, pady=(0, 10))
+
+        def set_theme(mode: str):
+            self.theme_var.set(mode)
+            if mode == "Light":
+                ctk.set_appearance_mode("light")
+                self.sidebar.configure(fg_color="#111827")
+                self.content.configure(fg_color="#F3F4F6")
+            elif mode == "Dark":
+                ctk.set_appearance_mode("dark")
+                self.sidebar.configure(fg_color="#020617")
+                self.content.configure(fg_color="#020617")
+            else:
+                ctk.set_appearance_mode("system")
+                self.sidebar.configure(fg_color="#111827")
+                self.content.configure(fg_color="#F3F4F6")
+
+            # rebuild current page so background/colors refresh nicely
+            self._refresh_current_page()
+
+        ctk.CTkRadioButton(
+            theme_row,
+            text="Light",
+            value="Light",
+            variable=self.theme_var,
+            command=lambda: set_theme("Light"),
         ).pack(side="left", padx=(0, 10))
 
-        appearance_var = ctk.StringVar(value="Light")
+        ctk.CTkRadioButton(
+            theme_row,
+            text="Dark",
+            value="Dark",
+            variable=self.theme_var,
+            command=lambda: set_theme("Dark"),
+        ).pack(side="left", padx=10)
 
-        def on_appearance_change(choice: str):
-            if choice.lower() == "dark":
-                ctk.set_appearance_mode("dark")
-            else:
-                ctk.set_appearance_mode("light")
+        ctk.CTkRadioButton(
+            theme_row,
+            text="System",
+            value="System",
+            variable=self.theme_var,
+            command=lambda: set_theme("System"),
+        ).pack(side="left", padx=10)
 
-            self.refresh_theme()
+        # Hotel info
+        hotel_frame = ctk.CTkFrame(wrapper, fg_color="white", corner_radius=16)
+        hotel_frame.pack(fill="x", pady=(0, 16))
 
-        ctk.CTkOptionMenu(
-            appearance_row,
-            values=["Light", "Dark"],
-            variable=appearance_var,
-            command=on_appearance_change,
-            width=140,
-        ).pack(side="left")
-
-        # Placeholder more settings
         ctk.CTkLabel(
-            main,
-            text="\nMore settings ideas:\n"
-                 "• Change hotel name / logo on all pages.\n"
-                 "• Default language / currency.\n"
-                 "• Enable / disable modules (Restaurant, Cleaning, etc.).",
-            font=ctk.CTkFont(size=12),
-            text_color="#4B5563",
-            justify="left",
-        ).pack(anchor="w", padx=16, pady=(10, 10))
+            hotel_frame,
+            text="Hotel Information",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(anchor="w", padx=16, pady=(10, 4))
 
-        return frame
+        row = ctk.CTkFrame(hotel_frame, fg_color="white")
+        row.pack(fill="x", padx=16, pady=(0, 10))
 
-    # ------------------------------------------------------------------
-    # OPEN OTHER WINDOWS FROM MANAGER
-    # ------------------------------------------------------------------
+        ctk.CTkLabel(row, text="Hotel name:", width=100, anchor="e").pack(
+            side="left", padx=(0, 8)
+        )
+        self.hotel_name_entry = ctk.CTkEntry(row, placeholder_text="My Hotel Name")
+        self.hotel_name_entry.pack(side="left", fill="x", expand=True)
 
-    def open_receptionist(self):
-        # Hide manager, open Receptionist window; on its logout you come back here
-        self.withdraw()
-        win = ReceptionistWindow(parent=self, user=self.user)
+        # save button (demo)
+        ctk.CTkButton(
+            hotel_frame,
+            text="Save Settings",
+            width=140,
+            fg_color="#3B82F6",
+            hover_color="#2563EB",
+            command=self._save_settings_demo,
+        ).pack(anchor="e", padx=16, pady=(0, 12))
+
+    def _save_settings_demo(self):
+        name = self.hotel_name_entry.get().strip() if hasattr(self, "hotel_name_entry") else ""
+        messagebox.showinfo("Settings", f"Settings saved (demo).\nHotel name: {name or 'Not set'}")
+
+    # ---------- OPEN OTHER UIs (real department windows) ----------
+
+    def open_reception_ui(self):
+        # open ReceptionistWindow with Manager as parent
+        win = ReceptionistWindow(parent=self, user={"username": "manager"})
         win.protocol("WM_DELETE_WINDOW", win.on_window_close)
 
-    def open_restaurant(self):
-        self.withdraw()
-        win = RestaurantWindow(parent=self, user=self.user)
+    def open_restaurant_ui(self):
+        win = RestaurantWindow(parent=self, user={"username": "manager"})
         win.protocol("WM_DELETE_WINDOW", win.on_window_close)
 
-    def open_cleaning(self):
-        self.withdraw()
-        win = CleaningWindow(parent=self, user=self.user)
+    def open_cleaning_ui(self):
+        win = CleaningWindow(parent=self, user={"username": "manager"})
+        # CleaningWindow already handles on_window_close internally
+
+    def open_finance_ui(self):
+        win = FinanceWindow(parent=self, user={"username": "manager"})
         win.protocol("WM_DELETE_WINDOW", win.on_window_close)
 
-    def open_finance(self):
-        self.withdraw()
-        win = FinanceWindow(parent=self, user=self.user)
-        win.protocol("WM_DELETE_WINDOW", win.on_window_close)
+    # ---------- LOGOUT / CLOSE ----------
 
-    # ------------------------------------------------------------------
-    # LOGOUT / CLOSE
-    # ------------------------------------------------------------------
-
-    def on_logout(self):
-        """Logout from Manager back to Login window."""
+    def _logout(self):
+        """Logout from manager back to login window."""
         self.destroy()
         if self.parent is not None:
             try:
@@ -820,26 +646,5 @@ class ManagerWindow(ctk.CTkToplevel):
                 pass
 
     def on_window_close(self):
-        self.on_logout()
-
-
-# Small manual test launcher
-if __name__ == "__main__":
-    ctk.set_appearance_mode("light")
-    app = ctk.CTk()
-    app.title("Manager Demo")
-    app.geometry("500x300")
-
-    def refresh_theme(self):
-        """Force full UI redraw after appearance change."""
-        for widget in self.winfo_children():
-            widget.destroy()
-        self._build_layout()
-        self.show_page(self.current_page_name or "dashboard")
-
-
-    def open_manager():
-        ManagerWindow(parent=app, user={"username": "manager"})
-
-    ctk.CTkButton(app, text="Open Manager", command=open_manager).pack(pady=40)
-    app.mainloop()
+        # Same as logout when X is pressed
+        self._logout()
