@@ -1,0 +1,33 @@
+hotel_app/
+│
+├── main.py
+│
+├── database/
+│     └── hotel.db
+│
+├── ui/
+│     ├── login.py
+│     ├── receptionist.py
+│     ├── restaurant.py
+│     ├── finance.py
+│     ├── cleaning.py
+│     ├── management.py
+│     └── __init__.py
+│
+├── backend/
+│     ├── config.py
+│     ├── db.py
+│     ├── rooms.py
+│     ├── users.py
+│     ├── finance.py
+│     └── __init__.py
+│
+└── assets/
+      └── icons/
+             ├── table.png
+             ├── print_receipt.png
+             ├── broom.png
+             ├── updown_arrow.png
+             ├── logout.png
+             ├── settings.png
+             └── reports.png
