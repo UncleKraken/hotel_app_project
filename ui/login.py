@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 from tkinter import messagebox
-
+from ui.manager import ManagerWindow
 from backend import users
 from ui.receptionist import ReceptionistWindow
 from ui.restaurant import RestaurantWindow
@@ -110,6 +110,10 @@ class LoginWindow(ctk.CTk):
         elif role == "Finance":
             self.open_finance(user)
 
+        elif role == "Manager":
+
+            self.open_manager(user)
+
         elif role == "Cleaning":
             self.open_cleaning(user)
 
@@ -134,6 +138,11 @@ class LoginWindow(ctk.CTk):
     def open_finance(self, user):
         self.withdraw()
         win = FinanceWindow(parent=self, user=user)
+        win.protocol("WM_DELETE_WINDOW", win.on_window_close)
+
+    def open_manager(self, user: dict):
+        self.withdraw()
+        win = ManagerWindow(parent=self, user=user)
         win.protocol("WM_DELETE_WINDOW", win.on_window_close)
 
     def open_cleaning(self, user):
